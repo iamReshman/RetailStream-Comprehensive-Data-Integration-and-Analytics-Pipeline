@@ -1,0 +1,155 @@
+#loading
+feature_df = spark.table("workspace.default.features_data_set")
+sales_df = spark.table("workspace.default.sales_dataset")
+store_df = spark.table("workspace.default.stores_data_set")
+#monitoring
+feature_df.show()
+sales_df.show()
+store_df.show()
+#cleaning and renaming
+from pyspark.sql.functions import to_date, col
+
+sales_df = sales_df.withColumn("Date", to_date("Date", "yyyy-MM-dd")) \
+                   .withColumn("Weekly_Sales", col("Weekly_Sales").cast("double"))
+
+feature_df = feature_df.withColumn("Date", to_date("Date", "yyyy-MM-dd")) \
+                         .withColumn("Unemployment", col("Unemployment").cast("double")) \
+                         .withColumn("Fuel_Price", col("Fuel_Price").cast("double"))
+
+store_df = store_df.withColumn("Store", col("Store").cast("int"))
+#clean and transform
+sales_feature = sales_df.join(feature_df, on=["Store", "Date", "IsHoliday"], how="left")
+final_df = sales_feature.join(store_df, on="Store", how="left")
+final_df = final_df.dropDuplicates()
+final_df.createOrReplaceTempView("retail_data")
+#queries
+1. Customer Visit Analysis
+Goal: Average customer visits in Type B stores during April.
+
+sql
+Copy code
+SELECT 
+    AVG(Weekly_Sales) AS avg_customer_visit_sales
+FROM retail_data
+WHERE Store_Type = 'B'
+  AND MONTH(Date) = 4;
+2. Holiday Sales Analysis
+Goal: Best average sales during holiday weeks across stores.
+
+sql
+Copy code
+SELECT 
+    Store, 
+    AVG(Weekly_Sales) AS avg_holiday_sales
+FROM retail_data
+WHERE IsHoliday = 'TRUE'
+GROUP BY Store
+ORDER BY avg_holiday_sales DESC
+LIMIT 1;
+3. Leap Year Sales Analysis
+Goal: Store with worst sales performance in leap years.
+
+sql
+Copy code
+SELECT 
+    Store, 
+    SUM(Weekly_Sales) AS total_sales
+FROM retail_data
+WHERE MOD(YEAR(Date), 4) = 0
+GROUP BY Store
+ORDER BY total_sales ASC
+LIMIT 1;
+4. Sales Prediction with Unemployment Factor
+Goal: Predict sales per department when unemployment > 8%.
+
+sql
+Copy code
+SELECT 
+    Store, 
+    Department, 
+    AVG(Weekly_Sales) AS avg_sales_high_unemployment
+FROM retail_data
+WHERE Unemployment > 8
+GROUP BY Store, Department
+ORDER BY Store, Department;
+5. Monthly Sales Aggregation
+Goal: Total sales of each department per month.
+
+sql
+Copy code
+SELECT 
+    Department, 
+    MONTH(Date) AS Month, 
+    SUM(Weekly_Sales) AS total_monthly_sales
+FROM retail_data
+GROUP BY Department, MONTH(Date)
+ORDER BY Department, Month;
+6. Weekly High Sales Store Identification
+Goal: Store with the highest sales each week.
+
+sql
+Copy code
+SELECT Week, Store, TotalSales
+FROM (
+    SELECT 
+        WEEKOFYEAR(Date) AS Week,
+        Store,
+        SUM(Weekly_Sales) AS TotalSales,
+        RANK() OVER (PARTITION BY WEEKOFYEAR(Date) ORDER BY SUM(Weekly_Sales) DESC) AS rnk
+    FROM retail_data
+    GROUP BY WEEKOFYEAR(Date), Store
+) ranked
+WHERE rnk = 1;
+7. Department Performance Analysis
+Goal: Analyze performance of each department.
+
+sql
+Copy code
+SELECT 
+    Department,
+    AVG(Weekly_Sales) AS avg_sales,
+    MAX(Weekly_Sales) AS max_sales,
+    MIN(Weekly_Sales) AS min_sales
+FROM retail_data
+GROUP BY Department
+ORDER BY avg_sales DESC;
+8. Fuel Price Analysis
+Goal: Store with minimum fuel price each week.
+
+sql
+Copy code
+SELECT Week, Store, Fuel_Price
+FROM (
+    SELECT 
+        WEEKOFYEAR(Date) AS Week,
+        Store,
+        Fuel_Price,
+        RANK() OVER (PARTITION BY WEEKOFYEAR(Date) ORDER BY Fuel_Price ASC) AS rnk
+    FROM retail_data
+    WHERE Fuel_Price IS NOT NULL
+) ranked
+WHERE rnk = 1;
+9. Yearly Store Performance Analysis
+Goal: Store-wise total sales per year.
+
+sql
+Copy code
+SELECT 
+    Store,
+    YEAR(Date) AS Year,
+    SUM(Weekly_Sales) AS total_yearly_sales
+FROM retail_data
+GROUP BY Store, YEAR(Date)
+ORDER BY Year, total_yearly_sales DESC;
+10. Weekly Performance Analysis with/without Offers
+Goal: Compare sales with and without offers per week.
+
+sql
+Copy code
+SELECT 
+    WEEKOFYEAR(Date) AS Week,
+    IsHoliday,
+    AVG(Weekly_Sales) AS avg_weekly_sales
+FROM retail_data
+GROUP BY WEEKOFYEAR(Date), IsHoliday
+ORDER BY Week, IsHoliday;
